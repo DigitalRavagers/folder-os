@@ -2,9 +2,9 @@
 
 A local folder system for client projects and content work, with explicit next steps and an evidence-backed completion log.
 
-**Pilot candidate: 0.1.0-pilot. Not yet validated on macOS or Windows.**
+**Pilot candidate: 0.1.0-pilot. Automated tests pass on Linux, macOS and Windows; manual first runs pending.**
 
-> Pilot source, published to get real macOS and Windows test results. There is no install-ready release yet.
+> Pilot source with native automated test results. There is no install-ready release yet.
 
 ## What it does
 
@@ -36,10 +36,10 @@ Python 3 is required. The kit is written for Python 3.8+, but that lower bound h
 
 | Environment | Evidence in the supplied kit |
 | --- | --- |
-| Linux, Python 3.13 | Author-run synthetic tests recorded. |
-| Linux, Python 3.10, non-root | Independent review records 62 passing checks after fixes. Not rerun for this README review. |
-| macOS | Native tests and manual first run pending. |
-| Windows | Native tests and manual first run pending. |
+| Linux, Python 3.13 | Native CI: 62 passed, 0 failed, 0 skipped. |
+| Linux, Python 3.10 | Native CI: 62 passed, 0 failed, 0 skipped; independent local run also passed. |
+| macOS, Python 3.10 and 3.13 | Native CI: 62 passed, 0 failed, 0 skipped. Manual first run pending. |
+| Windows, Python 3.10 and 3.13 | Native CI: 61 passed, 0 failed, 1 skipped (POSIX-only boundary test 45). Manual first run pending. |
 | AI assistants | File-based design; no assistant or cross-assistant handoff has been run-tested. |
 
 ## First run: synthetic data only
@@ -108,4 +108,19 @@ MIT licence, copyright George John. See [LICENSE](LICENSE). This is an unsupport
 
 ## Before this becomes a release
 
-Native macOS and Windows results (see the Actions tab for the automated runs), a manual first run on a real Mac and Windows machine, and an extracted-archive check of the first-run steps. No release or ready-for-production claim is made until then.
+A manual first run on a real Mac and Windows machine, and an extracted-archive check of the first-run steps. No release or ready-for-production claim is made until then.
+
+## Automated platform evidence (13 Nov 2026)
+
+Passing run: https://github.com/DigitalRavagers/folder-os/actions/runs/43407934320
+Tested code commit: ee97bdd191bc5d1622d0a7feab3d9630d84e3429.
+GitHub-hosted ubuntu-latest and macos-latest, each with Python 3.10 and 3.13:
+62 passed, 0 failed, 0 skipped. Windows-latest with both Python versions:
+61 passed, 0 failed, 1 skipped. Test 45 (permission-denied boundary canary)
+is POSIX-only and was skipped on Windows. Windows access-control blocking
+is not verified. These are synthetic scratch-folder tests, not a manual
+first run on a person's Mac or Windows PC. No install-ready release is made.
+
+Earlier runs found a .git text-scan error, a test function shadowed by a local
+variable, and a real Windows command-quoting bug. All were fixed before the
+passing run. The earlier failed runs remain visible in Actions.
