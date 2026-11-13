@@ -515,7 +515,7 @@ def main():
     import common
     dashes, secrets = [], []
     for folder, dirs, names in os.walk(KIT):
-        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git")]
         for name in names:
             path = Path(folder) / name
             body = path.read_text(encoding="utf-8")
