@@ -2,15 +2,15 @@
 
 What was actually run: `tests/test_kit.py`, run clean on Linux on synthetic data: by the kit's
 author (Python 3.13, running as the root user) and again by an independent reviewer (Python 3.10,
-non-root, 62 checks after the review fixes below). Nothing was run on a Mac or Windows.
+non-root, 62 checks after the review fixes below). Native CI now also passes on Mac and Windows; see the platform evidence below.
 Everything below is unproven. Treat each line as a test still to do.
 
 ## Platforms and machines
 
 | Gap | Why it matters | How to close it |
 | :--- | :--- | :--- |
-| **Mac: never run.** | The pilot user is on a Mac. Python availability, the developer tools prompt, Finder's `.DS_Store` files, iCloud-synced Desktop and Documents, and case-insensitive disks are all untested. | Run `INSTALL.md` and `tests/test_kit.py` on a Mac. Record the output. |
-| **Windows: never run for this kit.** | Path separators, `py -3`, quoting for `--check-cmd`, links turning into text stubs, files locked by open windows during uninstall. | Same, on Windows. |
+| **Mac: automated tests pass; manual first run pending.** | The pilot user is on a Mac. Python availability, the developer tools prompt, Finder's `.DS_Store` files, iCloud-synced Desktop and Documents, and case-insensitive disks are all untested. | Run `INSTALL.md` and `tests/test_kit.py` on a Mac. Record the output. |
+| **Windows: automated tests pass; manual first run pending.** | The command-quoting bug found by CI is fixed. Manual `py -3` steps, sync/antivirus file locking and personal-PC permissions remain unverified. | Same, on Windows. |
 | **A second machine: never tried.** | Moving or copying the folder to another computer, line-ending changes, different timezones in receipt names. | Copy an installed tree to a second machine, run doctor and lint there. |
 | **Older Python: not run.** | The code is written for 3.8 and later but only 3.13 and 3.10 were run. | Run the test on the Mac's own Python version. |
 | **Non-English file names and text: not tested.** | Client names with accents or other scripts become folder names with those letters dropped. | Try the intake with such names. |
@@ -37,7 +37,7 @@ Everything below is unproven. Treat each line as a test still to do.
 | Gap | Why it matters | How to close it |
 | :--- | :--- | :--- |
 | **The real boundary does not exist yet.** | The kit only tests a boundary (`doctor.py --boundary-canary`). Creating it (separate user account or locked encrypted volume) is manual and unverified on the pilot machine. | Do it, then run the canary from inside the AI tool. |
-| **The canary test was run as root dropping to another user.** | That proves the check tells open from blocked on Linux. It says nothing about a Mac, or about an AI tool's sandbox. | Run on the Mac, from the AI tool. |
+| **The canary test was run as root dropping to another user.** | That proves the check tells open from blocked on Linux. Native macOS CI now also passes this test. It says nothing about a personal Mac or an AI tool's sandbox. | Run on the Mac, from the AI tool. |
 | **Secret detection is a pattern list.** | Seven patterns. Four canaries were tested. A password with no label next to it passes straight through. Long numbers such as phone lists can be refused by mistake. | Keep secrets out by habit. Extend the patterns from real misses. |
 | **No inventory of the user's data and secrets.** | Gate 1 in BOOT.md. Nothing in the kit does this for you. | Write it by hand before real data. |
 | **Sync and mirror tools: untested.** | Doctor warns when the path looks synced. No sync tool was run against the tree. | Test any sync tool on a copy first. |
@@ -84,11 +84,26 @@ because a kit that reports only its passing run is not following its own rules.
 - **Open, by design:** `capture.py close --check-cmd` runs whatever program you name, with your own
   permissions, and treats exit code 0 as a pass. It proves a check ran, not that the check was good.
   Anyone, or any AI tool, that can run the kit's tools can run a command this way. Read the command
-  before approving it. Not run on Windows (quoting differs).
+  before approving it. Windows CI exposed a quoting bug, now fixed and passing.
 - **Open:** a person who can edit the install record can still make uninstall delete files inside the
   system folder. The record sits next to the files it describes, so it is not a security boundary.
-- **Windows/Mac, static review only (no run):** the permission-denied test (45) is POSIX-only and is
+- **Windows/Mac native CI completed:** the permission-denied test (45) is POSIX-only and is
   reported as SKIPPED elsewhere, not passed. Symlink checks are skipped where links cannot be made.
   Untested risks: Windows long paths and file locking by sync or antivirus tools, case-insensitive
   disks (Mac default, Windows) with names that differ only by case, and the old Mac Python shim.
-  Compatibility with Mac and Windows is a goal, not a result, until tests/test_kit.py is run on each.
+  Synthetic native CI is now green on both; manual first-run compatibility remains pending.
+
+## Automated platform evidence (13 Nov 2026)
+
+Passing run: https://github.com/DigitalRavagers/folder-os/actions/runs/43407934320
+Tested code commit: ee97bdd191bc5d1622d0a7feab3d9630d84e3429.
+GitHub-hosted ubuntu-latest and macos-latest, each with Python 3.10 and 3.13:
+62 passed, 0 failed, 0 skipped. Windows-latest with both Python versions:
+61 passed, 0 failed, 1 skipped. Test 45 (permission-denied boundary canary)
+is POSIX-only and was skipped on Windows. Windows access-control blocking
+is not verified. These are synthetic scratch-folder tests, not a manual
+first run on a person's Mac or Windows PC. No install-ready release is made.
+
+Earlier runs found a .git text-scan error, a test function shadowed by a local
+variable, and a real Windows command-quoting bug. All were fixed before the
+passing run. The earlier failed runs remain visible in Actions.
