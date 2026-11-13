@@ -191,7 +191,8 @@ def evidence(a, order):
         return True, "file %s exists, %d bytes, sha256 %s" % (
             rel(path.resolve()), path.stat().st_size, c.sha256_file(path))
     try:
-        run = subprocess.run(shlex.split(a.check_cmd, posix=(os.name != "nt")), cwd=ROOT,
+        run = subprocess.run([t[1:-1] if len(t) > 1 and t[0] == t[-1] == chr(34) else t
+                            for t in shlex.split(a.check_cmd, posix=(os.name != "nt"))], cwd=ROOT,
                              capture_output=True, timeout=300)
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         return False, "check command could not run (%s)" % type(error).__name__
