@@ -1,0 +1,20 @@
+{
+  "format_version": 1,
+  "owner_name": "Pilot Owner",
+  "work_summary": "Client projects plus a training and content business.",
+  "weekly_task": "Knowing the next step for every client project.",
+  "arrival_points": ["email", "voice notes", "downloads"],
+  "clients": [
+    {"name": "First Real Client", "projects": ["First Project"]}
+  ],
+  "content_business": true,
+  "review_gates": ["Before anything is sent to a client", "Before anything is published"],
+  "voice_rules": ["Plain words", "Short sentences"],
+  "failure_definition": "A client project with no written next step, or a deliverable sent without a check.",
+  "keep_out": ["anything a client marked confidential that I have not agreed to store"],
+  "modules": {"money": false},
+  "harness": "unconfirmed",
+  "storage": "unconfirmed",
+  "include_synthetic_example": true,
+  "corrections": ""
+}
