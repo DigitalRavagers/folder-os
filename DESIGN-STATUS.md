@@ -1,6 +1,6 @@
 # FolderOS design and test status
 
-This file is the full description of what the kit builds and how far each design rule was tested. The short entry page is README.md. Version 0.1.0-pilot. Status: pilot, run-tested on Linux only (Python 3.13 by the author, Python 3.10 by an independent reviewer).
+This file is the full description of what the kit builds and how far each design rule was tested. The short entry page is README.md. Version 0.1.0-pilot. Status: pilot, native automated tests pass on Linux, macOS and Windows, Python 3.10 and 3.13. Windows skips POSIX-only test 45; manual first runs remain pending.
 
 ## What it is
 
@@ -110,8 +110,7 @@ python3 tools/capture.py fail --meant "send the weekly summary" --failed "export
 
 ## How the design rules are enforced, and how far each was tested
 
-Labels: **RUN-TESTED** means the test script proved it on Linux
-(Python 3.13 author run, Python 3.10 independent run). **DESIGNED-FOR** means the code is written for it but it was not
+Labels: **RUN-TESTED** below originally referred to the Linux checks. The full suite now also passes native macOS and Windows CI, with Windows test 45 skipped. **DESIGNED-FOR** means the code is written for it but it was not
 run. **UNTESTED** means exactly that.
 
 | Rule | How | Status |
@@ -130,14 +129,14 @@ run. **UNTESTED** means exactly that.
 | Boundary is access control, not a label | Private material stays outside the folder. `doctor.py --boundary-canary` tests whether the running process can actually read a private folder. The kit cannot create the boundary for you. | Canary check RUN-TESTED on Linux (44, 45). Your real boundary: UNTESTED |
 | No links or pointer stubs | Lint and doctor fail on any link in the tree and on a file that is only a path. Search never follows links. | RUN-TESTED on Linux (19, 43). Windows text-stub behaviour: UNTESTED |
 | Log names cannot collide | Date, time with seconds, timezone, session id, counter. | RUN-TESTED (35, 36) |
-| Works on a Mac | Standard library Python, no shell scripts, no links. | UNTESTED |
-| Works on Windows | Same. | UNTESTED for this kit |
+| Works on a Mac | Standard library Python, no shell scripts, no links. | Native CI passed; manual first run pending |
+| Works on Windows | Same. | Native CI passed except POSIX-only test 45 skipped; manual first run pending |
 | Works with any AI tool | Plain files plus `CLAUDE.md` and `AGENTS.md`. | DESIGNED-FOR, no AI tool was run against it |
 
 ## Honest limits
 
-- It has been run in one Linux sandbox by its author. No Mac, no Windows, no
-  second machine, no real person, no real data. See `KNOWN-GAPS.md`.
+- Native synthetic CI passed on Linux, Mac and Windows. No manual first run on
+  a personal Mac or Windows PC, no real person or real data. See `KNOWN-GAPS.md`.
 - The scripts cannot stop an AI tool, or you, from reading or writing files
   directly. They make the right path easy and make the wrong path visible in
   lint, doctor and the receipts.
@@ -154,3 +153,18 @@ python3 tests/test_kit.py
 ```
 
 It works in a temporary scratch folder with synthetic data and removes it afterwards.
+
+## Automated platform evidence (13 Nov 2026)
+
+Passing run: https://github.com/DigitalRavagers/folder-os/actions/runs/43407934320
+Tested code commit: ee97bdd191bc5d1622d0a7feab3d9630d84e3429.
+GitHub-hosted ubuntu-latest and macos-latest, each with Python 3.10 and 3.13:
+62 passed, 0 failed, 0 skipped. Windows-latest with both Python versions:
+61 passed, 0 failed, 1 skipped. Test 45 (permission-denied boundary canary)
+is POSIX-only and was skipped on Windows. Windows access-control blocking
+is not verified. These are synthetic scratch-folder tests, not a manual
+first run on a person's Mac or Windows PC. No install-ready release is made.
+
+Earlier runs found a .git text-scan error, a test function shadowed by a local
+variable, and a real Windows command-quoting bug. All were fixed before the
+passing run. The earlier failed runs remain visible in Actions.
