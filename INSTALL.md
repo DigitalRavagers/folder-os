@@ -2,13 +2,13 @@
 
 | Platform | Status |
 | :--- | :--- |
-| Linux, Python 3.13 | Tested by the author (synthetic data, root user) |
-| Linux, Python 3.10 | Tested independently (non-root, 62 checks) |
-| Mac | UNTESTED. The steps below are written from how Macs normally behave. Nobody has run them. |
-| Windows | UNTESTED for this kit. |
+| Linux, Python 3.13 | Native CI: 62 passed, no failures or skips |
+| Linux, Python 3.10 | Native CI and independent local run: 62 passed |
+| Mac | Native CI on Python 3.10 and 3.13: 62 passed. Manual steps below not yet tried on a personal Mac. |
+| Windows | Native CI on Python 3.10 and 3.13: 61 passed, 1 POSIX-only check skipped. Manual first run pending. |
 
-Because Mac and Windows are untested, the first install on either one is itself
-a test. Do it with the synthetic example only, and write down anything that does
+Automated tests passed, but the first manual install on Mac or Windows is still
+a pilot test. Do it with the synthetic example only, and write down anything that does
 not match these steps.
 
 The installer creates one new folder and nothing else. It does not move, delete
@@ -18,7 +18,7 @@ removes it again.
 You will not be asked for any password or key at any point. If something asks
 for one, stop.
 
-## Mac (primary, UNTESTED)
+## Mac (manual first run pending)
 
 ### 1. Open Terminal
 
@@ -141,7 +141,7 @@ python3 tools/capture.py new-project --client "Real Client" --project "Real Proj
 python3 tools/capture.py next --client "Real Client" --project "Real Project" --next "..." --done-when "..."
 ```
 
-## Windows (UNTESTED for this kit)
+## Windows (manual first run pending)
 
 Same steps, with these differences:
 
@@ -158,7 +158,7 @@ cd ~/work-system
 py -3 tools\doctor.py
 ```
 
-Known Windows risks, none tested: Desktop and Documents are often inside
+Windows risks beyond the synthetic CI checks: Desktop and Documents are often inside
 OneDrive; links can turn into small text files (lint and doctor are written to
 flag both links and such stubs); a folder that is open in another window may
 refuse to be removed by uninstall.
@@ -187,3 +187,18 @@ by hand. Nothing outside the system folder is touched in either case.
 - Run `python3 tools/doctor.py`. Every line that is not `LIVE` comes with a `fix:` line.
 - Run `python3 tools/lint.py`. Every `ERROR` line names the file and the problem.
 - Nothing here needs the internet, an account, or a password.
+
+## Automated platform evidence (13 Nov 2026)
+
+Passing run: https://github.com/DigitalRavagers/folder-os/actions/runs/43407934320
+Tested code commit: ee97bdd191bc5d1622d0a7feab3d9630d84e3429.
+GitHub-hosted ubuntu-latest and macos-latest, each with Python 3.10 and 3.13:
+62 passed, 0 failed, 0 skipped. Windows-latest with both Python versions:
+61 passed, 0 failed, 1 skipped. Test 45 (permission-denied boundary canary)
+is POSIX-only and was skipped on Windows. Windows access-control blocking
+is not verified. These are synthetic scratch-folder tests, not a manual
+first run on a person's Mac or Windows PC. No install-ready release is made.
+
+Earlier runs found a .git text-scan error, a test function shadowed by a local
+variable, and a real Windows command-quoting bug. All were fixed before the
+passing run. The earlier failed runs remain visible in Actions.
