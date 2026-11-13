@@ -498,12 +498,12 @@ def main():
     outside.mkdir()
     tree = tamper / "system"
     rs = run(SCRIPTS / "setup.py", "--answers", KIT / "intake-answers.example.json", "--target", tree)
-    record = tree / ".install" / "install.json"
-    data = json.loads(record.read_text())
+    install_json = tree / ".install" / "install.json"
+    data = json.loads(install_json.read_text())
     data["dirs"] = list(data["dirs"]) + ["../outside-empty-folder", ".."]
     data["files"]["../outside-file.txt"] = "0" * 64
     (tamper / "outside-file.txt").write_text("keep me", encoding="utf-8")
-    record.write_text(json.dumps(data), encoding="utf-8")
+    install_json.write_text(json.dumps(data), encoding="utf-8")
     ru = run(tree / "tools" / "uninstall.py", "--yes")
     check("62 uninstall with a tampered install record never removes anything outside the system folder",
           rs.returncode == 0 and ru.returncode == 0 and outside.is_dir()
