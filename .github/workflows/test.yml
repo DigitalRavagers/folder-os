@@ -29,3 +29,5 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Run the kit's tests
         run: python tests/test_kit.py
+      - name: Prove targeted guards catch mutations
+        run: python tests/mutation_check.py
