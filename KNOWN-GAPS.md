@@ -43,6 +43,26 @@ Everything below is unproven. Treat each line as a test still to do.
 | **Sync and mirror tools: untested.** | Doctor warns when the path looks synced. No sync tool was run against the tree. | Test any sync tool on a copy first. |
 | **No backup.** | The kit does not back anything up. | Decide a backup in the intake (question 13) and test a restore. |
 
+## Acceptance contracts (candidate change, local results only)
+
+What was run: on one Linux sandbox (Python 3.11, 3.12 and 3.13 for the tests, 3.13 for the mutation check; root user, synthetic data),
+`tests/test_kit.py` passed 75 checks (the 62 existing ones plus 13 new, numbered
+63 to 75) and `tests/mutation_check.py` killed 5 of 5 hand-picked mutants.
+Nothing else is proven. In particular:
+
+| Gap | Why it matters | How to close it |
+| :--- | :--- | :--- |
+| **Not run in native CI.** | The 62-check native results on Linux, Mac and Windows are for the code before this change. Path, link and line-ending handling for contracts is untested on Mac and Windows, and on Python 3.10 (not available where this was built). | Run the workflow on the candidate. |
+| **Human acceptance is unproven.** | `mark --by` records whatever name is typed. There is no login, signature or second person. A tool can type a person's name. | A real review step by the pilot user, observed. |
+| **Real handoff is unproven.** | "delivered" is a status in a text file. Nothing checks that a client received the bytes that were verified. | Compare the stored artifact hash with the file actually sent. |
+| **Direct edits defeat it.** | The contract, the artifact, the work order and the stored hashes are all plain files. Anyone who can edit them can rewrite the hashes to match. The mechanism detects honest drift, not tampering. | Operating system permissions or signed records, if the pilot shows a need. |
+| **Criteria can be weak.** | The tool checks the criteria it is given. A contract with one trivial check passes trivially. The contract author can also be the one doing the work. | A person writes or reviews the contract before work starts. |
+| **Literal text checks only.** | No structure, no numbers, no meaning. `has_line` compares whole lines after trimming spaces; there is no Unicode normalisation. One artifact per contract, UTF-8 text, at most 2,000,000 bytes. | Extend criterion types only from real misses. |
+| **Check and use are separate moments.** | The artifact is read once and those bytes are both checked and hashed, but a file can still be swapped between verification and sending. A link check followed by a read is not atomic. | Re-verify immediately before sending. |
+| **Old work orders.** | Work orders closed before this change have no evidence mode and are treated as legacy. Nothing upgrades them. | Add a contract and run `close --contract`. |
+| **Mutation check is narrow.** | Five chosen guards. It is not mutation coverage and says nothing about code it does not list. One mutant was first reported INVALID because the test suite crashed instead of failing; the test helper was fixed and the run repeated. | Add mutants when a guard is added. |
+| **Installer counts changed.** | Setup now creates 50 files, not 48 (the validator and an example contract). RELEASE-REVIEW.md still describes the earlier code and was left as it was. | Update the review record after independent review. |
+
 ## Things not built
 
 - Voice checking. `VOICE.md` holds the rules. No script checks drafts against them.
@@ -107,3 +127,12 @@ first run on a person's Mac or Windows PC. No install-ready release is made.
 Earlier runs found a .git text-scan error, a test function shadowed by a local
 variable, and a real Windows command-quoting bug. All were fixed before the
 passing run. The earlier failed runs remain visible in Actions.
+
+## Independent review correction (14 November 2026)
+
+A synthetic edge probe found that a linked work-order file could relocate the
+evidence boundary through path resolution. Work-order lookup and contract load
+now reject linked work orders and linked ancestors before reading evidence.
+Tests 76 and 77 cover that boundary and control characters in artifact paths.
+The native workflow now runs the targeted mutation check as well as the suite.
+These changes still do not turn typed names into authenticated human approval.
