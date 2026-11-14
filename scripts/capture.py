@@ -5,8 +5,13 @@
   route        turn an inbox item into a work order (needs next step + done-when)
   discard      close an inbox item that needs no action (needs a reason)
   next         set a project's next step and done-when in its CURRENT.md
-  close        verify a work order with tool evidence (a file check or a command)
-  mark         move a verified work order to accepted, delivered or dropped
+  close        verify a work order. --contract evaluates its acceptance contract
+               (all criteria, bound to the exact artifact bytes). --check-file and
+               --check-cmd are LEGACY technical evidence: a file exists, or a
+               command exited 0. They do not check any criterion.
+  mark         move a verified work order to accepted, delivered or dropped.
+               --by is a typed label, not an authenticated identity, and
+               "delivered" is a record, not proof that anything was sent.
   fail         record a failure: meant to do, what failed, cause, recovery
   new-project  add a client project folder (additive, never overwrites)
   change       add a line to the change ledger (CHANGELOG.md)
@@ -24,6 +29,7 @@ import shlex
 import subprocess
 
 import common as c
+import contract as k
 
 ROOT = None
 REG = None
@@ -69,7 +75,10 @@ def find_work_order(work_id):
             if folder.name == "work-orders" and work_id + ".md" in files]
     if len(hits) != 1:
         c.die("Found %d work orders named %s." % (len(hits), work_id))
-    return hits[0]
+    order = hits[0]
+    if order.is_symlink() or any(parent.is_symlink() for parent in order.parents):
+        c.die("The work order path goes through a link; links are not followed.")
+    return order
 
 
 def room(a):
@@ -178,7 +187,14 @@ def evidence(a, order):
     --check-file: the file must sit inside this work order's own project folder and
     must not be the work order itself. --check-cmd runs any program you name, with your
     own permissions, and counts exit code 0 as a pass. It proves a check ran, not that
-    the check was a good one. Review the command before you let a tool run it."""
+    the check was a good one. Review the command before you let a tool run it.
+
+    Both are LEGACY technical evidence. Neither may close a work order that has an
+    acceptance contract: that would let an unrelated file or an always-zero command
+    stand in for the contract's criteria."""
+    if k.exists(order):
+        return False, ("this work order has an acceptance contract, so legacy checks "
+                       "cannot close it. Use: close --work-id %s --contract" % order.stem)
     if a.check_file:
         path = ROOT / a.check_file
         project = Path(order).resolve().parent.parent
@@ -203,19 +219,74 @@ def evidence(a, order):
 def cmd_close(a):
     order = find_work_order(a.work_id)
     meta, body = c.read_frontmatter(c.read_text(order))
-    if meta["status"] != "open":
-        c.die("%s is %s, not open." % (a.work_id, meta["status"]))
+    allowed = ("open", "verified", "accepted") if a.contract else ("open",)
+    if meta["status"] not in allowed:
+        c.die("%s is %s, not %s." % (a.work_id, meta["status"], " or ".join(allowed)))
+    if a.contract:
+        return close_contract(a, order, meta, body)
     passed, description = evidence(a, order)
     if not passed:
         refuse("verify %s against its done-when" % a.work_id,
                "not closed: " + description, cause="evidence check did not pass",
                work_id=a.work_id)
-    meta.update(status="verified", evidence=description, verified=c.iso())
+    description = "legacy technical evidence, no criterion checked: " + description
+    meta.update(status="verified", evidence=description, evidence_mode=k.LEGACY,
+                verified=c.iso())
     c.replace_text(order, c.write_frontmatter(meta, body))
-    append_line(order, "VERIFIED. Evidence: " + description)
-    done("close", "verified", "%s verified. A person still has to accept it: "
+    append_line(order, "VERIFIED (LEGACY). Evidence: " + description)
+    done("close", "verified", "%s verified with LEGACY technical evidence. No acceptance "
+         "criterion was checked. A person still has to review and accept it: "
          "tools/capture.py mark --work-id %s --status accepted --by NAME"
-         % (a.work_id, a.work_id), work_id=a.work_id, evidence=description)
+         % (a.work_id, a.work_id), work_id=a.work_id, evidence=description,
+         evidence_mode=k.LEGACY)
+
+
+def close_contract(a, order, meta, body):
+    """Close, or re-verify, against the work order's acceptance contract.
+    A failed re-verification reopens the work order: the earlier pass is void."""
+    result, problem = None, None
+    try:
+        result = k.check(order)
+    except k.ContractError as error:
+        problem = str(error)
+    if result and not result["ok"]:
+        problem = "criteria not met: " + ", ".join(
+            "%s (%s)" % (ident, kind) for ident, kind, met in result["results"] if not met)
+    if problem:
+        if meta["status"] != "open":
+            for field in k.EVIDENCE_FIELDS:
+                meta.pop(field, None)
+            meta["status"] = "open"
+            c.replace_text(order, c.write_frontmatter(meta, body))
+            append_line(order, "REOPENED. Re-verification against the acceptance contract "
+                        "failed, so the earlier verification no longer applies.")
+        details = {} if not result else {
+            "criteria": {ident: "pass" if met else "fail" for ident, _, met in result["results"]},
+            "contract_sha256": result["contract_sha256"],
+            "artifact_sha256": result["artifact_sha256"]}
+        refuse("verify %s against its acceptance contract" % a.work_id,
+               "not closed: " + problem, cause="acceptance contract check did not pass",
+               work_id=a.work_id, **details)
+    again = meta["status"] != "open"
+    count = len(result["results"])
+    description = ("acceptance contract v%d: %d of %d criteria met on artifact %s"
+                   % (k.VERSION, count, count, result["artifact"]))
+    meta.update(status="verified", evidence=description, evidence_mode=k.MODE,
+                contract_sha256=result["contract_sha256"], artifact=result["artifact"],
+                artifact_sha256=result["artifact_sha256"], verified=c.iso())
+    c.replace_text(order, c.write_frontmatter(meta, body))
+    append_line(order, "%s. %s. contract sha256 %s, artifact sha256 %s"
+                % ("RE-VERIFIED, any earlier acceptance no longer applies" if again
+                   else "VERIFIED", description, result["contract_sha256"],
+                   result["artifact_sha256"]))
+    done("close", "verified", "%s verified against its acceptance contract (%d criteria). "
+         "The evidence is bound to the current contract and artifact bytes; changing "
+         "either makes it stale. A person still has to review and accept it: "
+         "tools/capture.py mark --work-id %s --status accepted --by NAME"
+         % (a.work_id, count, a.work_id), work_id=a.work_id, evidence_mode=k.MODE,
+         criteria={ident: "pass" for ident, _, _ in result["results"]},
+         contract_sha256=result["contract_sha256"], artifact=result["artifact"],
+         artifact_sha256=result["artifact_sha256"])
 
 
 def cmd_mark(a):
@@ -230,11 +301,18 @@ def cmd_mark(a):
                cause="state order", work_id=a.work_id)
     if a.status == "dropped" and not a.note.strip():
         c.die("Dropping a work order needs --note with the reason.")
+    reason = k.stale(order, meta) if a.status in ("accepted", "delivered") else None
+    if reason:
+        refuse("mark %s as %s" % (a.work_id, a.status),
+               "refused: %s. Verify again first: tools/capture.py close --work-id %s "
+               "--contract" % (reason, a.work_id),
+               cause="stale or missing contract evidence", work_id=a.work_id)
     meta["status"] = a.status
     c.replace_text(order, c.write_frontmatter(meta, body))
     append_line(order, "%s by %s. %s" % (a.status.upper(), a.by, a.note))
-    done("mark", a.status, "%s is now %s." % (a.work_id, a.status), work_id=a.work_id,
-         by=a.by)
+    done("mark", a.status, "%s is now %s. The name is recorded as typed, not checked, "
+         "and this is a record, not proof of review or delivery."
+         % (a.work_id, a.status), work_id=a.work_id, by=a.by)
 
 
 def cmd_fail(a):
@@ -299,7 +377,7 @@ def main():
             (["--status"], {"default": "active",
                             "choices": ["setup", "active", "waiting", "done", "archived"]}))
     command("close", cmd_close, (["--work-id"], req), (["--check-file"], {}),
-            (["--check-cmd"], {}))
+            (["--check-cmd"], {}), (["--contract"], {"action": "store_true"}))
     command("mark", cmd_mark, (["--work-id"], req),
             (["--status"], {"required": True, "choices": ["accepted", "delivered", "dropped"]}),
             (["--by"], req), (["--note"], {"default": ""}))
@@ -312,9 +390,10 @@ def main():
     command("change", cmd_change, (["--what"], req), (["--why"], req))
     a = parser.parse_args()
 
-    if a.command == "close" and bool(a.check_file) == bool(a.check_cmd):
-        c.die("Give exactly one of --check-file or --check-cmd. A claim without a check "
-              "does not close a work order.")
+    if a.command == "close" and \
+            [bool(a.check_file), bool(a.check_cmd), a.contract].count(True) != 1:
+        c.die("Give exactly one of --contract, --check-file or --check-cmd. A claim "
+              "without a check does not close a work order.")
     for value in vars(a).values():
         hit = c.find_secret(value) if isinstance(value, str) else None
         if hit:
