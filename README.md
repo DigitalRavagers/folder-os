@@ -40,6 +40,7 @@ Python 3 is required. The kit is written for Python 3.8+, but that lower bound h
 | Linux, Python 3.10 | Native CI: 62 passed, 0 failed, 0 skipped; independent local run also passed. |
 | macOS, Python 3.10 and 3.13 | Native CI: 62 passed, 0 failed, 0 skipped. Manual first run pending. |
 | Windows, Python 3.10 and 3.13 | Native CI: 61 passed, 0 failed, 1 skipped (POSIX-only boundary test 45). Manual first run pending. |
+| Acceptance contracts (candidate) | Local only: Linux, Python 3.11, 3.12 and 3.13, 75 passed (62 existing + 13 new), 5 of 5 targeted mutants killed. Not yet run in native CI on any platform. |
 | AI assistants | File-based design; no assistant or cross-assistant handoff has been run-tested. |
 
 ## First run: synthetic data only
@@ -84,6 +85,33 @@ Expected: setup reports created files and a clean lint result. Doctor/lint must 
 
 For the complete capture-to-delivery example, intake interview, boundary gates and removal instructions, see [INSTALL.md](INSTALL.md), [INTAKE.md](INTAKE.md), [DESIGN-STATUS.md](DESIGN-STATUS.md) and [KNOWN-GAPS.md](KNOWN-GAPS.md). Keep those files beside this README in the release.
 
+## Acceptance contracts (candidate: local Linux results only, native CI pending)
+
+A work order can carry an acceptance contract: a small JSON file next to it
+(`work-orders/WO-<id>.contract.json`; example in `4-templates/`). It names one
+output file inside the same project folder and a list of literal checks on it:
+a required line (`has_line`), required text (`contains`) and forbidden text
+(`not_contains`). `capture.py close --work-id WO-<id> --contract` validates the
+contract strictly, evaluates every criterion, and on a pass stores the hash of
+the contract and the hash of the output file on the work order.
+
+- If either file changes afterwards, `mark --status accepted` and
+  `mark --status delivered` refuse, and lint reports an error, until the work
+  order is verified again. Re-verifying an accepted work order returns it to
+  verified; a failed re-verification reopens it.
+- A work order that has a contract cannot be closed with `--check-file` or
+  `--check-cmd`. Those two remain for work orders without a contract and are
+  recorded as legacy technical evidence: a file exists, or a command exited 0.
+- Nothing is executed, there are no patterns, links are not followed, and the
+  output file must sit inside the work order's own project folder.
+
+What this does not do: it does not judge whether the criteria were the right
+ones or whether the output is good; `--by` is a typed label, not an
+authenticated person; "delivered" is a record, not proof anything was sent;
+the stored hashes are plain text that anyone with file access can edit. Human
+acceptance and a real handoff have not been tested. Details and results:
+[DESIGN-STATUS.md](DESIGN-STATUS.md) and [KNOWN-GAPS.md](KNOWN-GAPS.md).
+
 ## Human or assistant setup
 
 You can ask an assistant:
@@ -98,7 +126,7 @@ This is a setup brief, not evidence that every assistant follows these files cor
 - Secret detection is pattern-based and can miss secrets. Do not use it as a vault or a security guarantee.
 - Concurrent users/processes, sync tools and real client workflows have not been proven.
 - Capture is text-only. There is no automatic backup, version history or upgrade/migration path.
-- A file existing proves only that a file exists, not that its content is good. Review the output before accepting or delivering it.
+- Legacy `--check-file` proves only that a file exists, not that its content is good. An acceptance contract proves only that the listed literal checks held for those exact bytes. Review the output before accepting or delivering it.
 - `capture.py close --check-cmd` executes the specified program with your permissions. Read any proposed command before approving it.
 - Uninstall is manifest/hash-based cleanup, not a backup restore. Read its preview and preservation limits before removal; do not opt into removing modified files casually.
 
@@ -124,3 +152,12 @@ first run on a person's Mac or Windows PC. No install-ready release is made.
 Earlier runs found a .git text-scan error, a test function shadowed by a local
 variable, and a real Windows command-quoting bug. All were fixed before the
 passing run. The earlier failed runs remain visible in Actions.
+
+## Independent review candidate, 14 November 2026
+
+Current isolated candidate: 77 checks passed on Linux Python 3.10, no failures
+or skips; five targeted mutations killed, none survived or invalid. Two checks
+added after independent review reject a linked work-order boundary and control
+characters in artifact paths. Native CI of this candidate is pending until the
+updated commit runs. Historical native results above belong to baseline 5268eac,
+not proof of the current upgrade. No real-user acceptance or delivery is proven.
