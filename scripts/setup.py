@@ -24,8 +24,8 @@ from pathlib import Path
 import common as c
 
 KIT = Path(__file__).resolve().parent
-TOOLS = ["common.py", "capture.py", "lint.py", "doctor.py", "search.py", "eod.py",
-         "uninstall.py"]
+TOOLS = ["common.py", "contract.py", "capture.py", "lint.py", "doctor.py", "search.py",
+         "eod.py", "uninstall.py"]
 ALWAYS_OUT = ["personal journaling", "passwords, API keys and other credentials",
               "banking and card details", "health information",
               "private notes about people"]
@@ -98,6 +98,8 @@ created: {{date}}
 ## States
 open, then verified (tool evidence), then accepted (a person), then delivered.
 Change state only with tools/capture.py close and tools/capture.py mark.
+Optional: put an acceptance contract next to this file (same name, ending
+.contract.json; example in 4-templates) and close with --contract.
 
 ## Evidence and state log
 - {{date}} Opened.
@@ -125,6 +127,19 @@ created: {{date}}
 
 ## Out of scope
 """
+
+# Copy next to a work order as WO-<id>.contract.json and edit. Rules: tools/contract.py.
+CONTRACT_EXAMPLE = json.dumps({
+    "contract_version": 1,
+    "work_id": "WO-c0000000",
+    "artifact": "deliverables/summary_draft_first.md",
+    "criteria": [
+        {"id": "has-summary-heading", "type": "has_line", "text": "## Summary"},
+        {"id": "names-the-client", "type": "contains", "text": "Example Client"},
+        {"id": "no-placeholder-left", "type": "not_contains", "text": "TODO",
+         "ignore_case": True},
+    ],
+}, indent=2) + "\n"
 
 MAP_TPL = """# Root map
 
@@ -159,7 +174,7 @@ and record with tools/capture.py change.
 1. Capture: everything new goes in through tools/capture.py add. Nothing else writes to the inbox.
 2. Route: tools/capture.py route turns an item into a work order. It refuses without a next step and a testable done-when. Filing is not doing.
 3. Do the work inside one room. Read that room's context.md first.
-4. Verify: tools/capture.py close needs tool evidence (a file check or a command that passes). Saying "done" closes nothing.
+4. Verify: tools/capture.py close needs tool evidence. Best: --contract, which checks every criterion of the work order's acceptance contract against the exact output file. --check-file and --check-cmd are legacy technical evidence only. Saying "done" closes nothing.
 5. A person accepts, then it is delivered: tools/capture.py mark.
 6. Record: every step writes a receipt in logs/receipts. Failures are recorded with tools/capture.py fail, never skipped.
 7. Learn: corrections go in CHANGELOG.md through tools/capture.py change.
@@ -409,6 +424,7 @@ def build(answers):
     files["4-templates/CURRENT.template.md"] = CURRENT_TPL
     files["4-templates/work-order.template.md"] = WORK_ORDER_TPL
     files["4-templates/brief.template.md"] = BRIEF_TPL
+    files["4-templates/acceptance-contract.example.json"] = CONTRACT_EXAMPLE
 
     sources = ["manual"] + [s for s in (c.slug(v) for v in answers.get("arrival_points", []))
                             if s and s != "manual"]
