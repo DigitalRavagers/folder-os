@@ -15,6 +15,7 @@ import json
 import re
 
 import common as c
+import contract as k
 
 
 def age_days(date_text):
@@ -57,7 +58,27 @@ def check_markdown(path, name, reg, tax, errors, warnings):
         days = age_days(meta.get("updated", ""))
         if days is not None and days > 7:
             warnings.append("%s: next step not refreshed for %d days" % (name, days))
+    if meta["type"] == "work-order":
+        check_contract_state(path, name, status, meta, errors, warnings)
     return meta, body
+
+
+def check_contract_state(path, name, status, meta, errors, warnings):
+    """A work order that claims verified or accepted on stale contract evidence is
+    an error. After delivery the same finding is a warning: the record no longer
+    matches the files on disk."""
+    problem = None
+    if status in ("verified", "accepted", "delivered"):
+        problem = k.stale(path, meta)
+    elif status == "open" and k.exists(path):
+        try:
+            k.load(path)
+        except k.ContractError as error:
+            problem = "its acceptance contract cannot be used: %s" % error
+    if problem:
+        (warnings if status == "delivered" else errors).append(
+            "%s: %s. Run tools/capture.py close --work-id %s --contract"
+            % (name, problem, path.stem))
 
 
 def check_inbox_item(root, path, name, parsed, reg, errors, warnings):
@@ -117,6 +138,9 @@ def lint(root):
                 parsed = check_markdown(path, name, reg, tax, errors, warnings)
             if (here == box or here.startswith(box + "/")) and filename != "context.md":
                 check_inbox_item(root, path, name, parsed, reg, errors, warnings)
+            if filename.endswith(".contract.json") and \
+                    filename[:-len(".contract.json")] + ".md" not in files:
+                errors.append("%s: acceptance contract without its work order" % name)
             if here == "logs/receipts" and filename != "context.md":
                 if not re.match(reg["naming"]["receipt"]["pattern"], filename):
                     errors.append("%s: receipt name does not follow the naming rule" % name)
