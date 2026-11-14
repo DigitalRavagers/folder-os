@@ -39,6 +39,7 @@ scripts/
   intake.py                   asks the intake questions, writes the answers file
   setup.py                    creates the new folder tree from the answers
   common.py                   shared helpers (copied into the new tree)
+  contract.py                 acceptance-contract validator (candidate, see below)
   capture.py                  capture, route, verify, record (the only inbox writer)
   lint.py                     structure and frontmatter check with real exit codes
   doctor.py                   health check and boundary canary
@@ -47,6 +48,7 @@ scripts/
   uninstall.py                rollback: removes only what the installer created
 tests/
   test_kit.py                 end-to-end test on synthetic data with canary secrets
+  mutation_check.py           removes chosen guards in disposable copies; the tests must fail
 ```
 
 ## What gets created (default answers)
@@ -91,6 +93,7 @@ When the work is finished: close with evidence, then a person accepts it.
 
 ```
 python3 tools/capture.py close --work-id WO-c1a2b3c4 --check-file 1-clients/client-name/project-name/deliverables/headlines_draft_first.md
+python3 tools/capture.py close --work-id WO-c1a2b3c4 --contract     (candidate: instead of the line above, when the work order has an acceptance contract)
 python3 tools/capture.py mark --work-id WO-c1a2b3c4 --status accepted --by "Your Name"
 python3 tools/capture.py mark --work-id WO-c1a2b3c4 --status delivered --by "Your Name"
 ```
@@ -122,6 +125,7 @@ run. **UNTESTED** means exactly that.
 | No duplicates | An item's id is a hash of its text. Same text, same id, no second entry. | RUN-TESTED (21, 22, 25) |
 | Filed is not done | Route refuses without a next step and a done-when. | RUN-TESTED (23, 24) |
 | Done means tool evidence | A work order closes only on a file check or a passing command. Then accepted by a person, then delivered, in that order. | RUN-TESTED (26 to 31) |
+| Done means the stated criteria held for these exact bytes (candidate) | Optional acceptance contract per work order; all criteria evaluated; evidence bound to contract hash and artifact hash; stale evidence blocks accepted and delivered. | Local Linux only (63 to 75, plus 5 targeted mutants). Native CI pending |
 | Failures are recorded | Refusals and failed checks write a failure receipt with meant, failed, cause, recovery. | RUN-TESTED (23, 27, 32) |
 | Lint never masks errors | Exit 0 clean, 1 errors, 2 cannot run. | RUN-TESTED (12 to 20) |
 | Search does not cross clients | `tools/search.py` needs one client or shared-only. It scopes this tool only. | RUN-TESTED for the tool (37 to 39) |
@@ -132,6 +136,83 @@ run. **UNTESTED** means exactly that.
 | Works on a Mac | Standard library Python, no shell scripts, no links. | Native CI passed; manual first run pending |
 | Works on Windows | Same. | Native CI passed except POSIX-only test 45 skipped; manual first run pending |
 | Works with any AI tool | Plain files plus `CLAUDE.md` and `AGENTS.md`. | DESIGNED-FOR, no AI tool was run against it |
+
+## Acceptance contracts (candidate change)
+
+Status: implemented and tested locally on Linux only (Python 3.11, 3.12 and 3.13). Not in
+native CI. No install-ready release. The existing folder layout and the
+existing states (open, verified, accepted, delivered, dropped) are unchanged.
+There is no new database, service or dependency.
+
+Scope of the change: one new module (`scripts/contract.py`), one new flag
+(`capture.py close --contract`), a staleness check in `capture.py mark` and in
+lint, a label in the end-of-day view, an example file in `4-templates/`, and
+tests. Doctor needed no change: it already runs lint and reports its result.
+
+**The file.** `work-orders/WO-<id>.contract.json`, next to `WO-<id>.md`:
+
+```json
+{
+  "contract_version": 1,
+  "work_id": "WO-c1a2b3c4",
+  "artifact": "deliverables/summary_draft_first.md",
+  "criteria": [
+    {"id": "has-summary", "type": "has_line", "text": "## Summary"},
+    {"id": "names-client", "type": "contains", "text": "Example Client"},
+    {"id": "no-placeholder", "type": "not_contains", "text": "TODO", "ignore_case": true}
+  ]
+}
+```
+
+**Strict validation.** UTF-8 JSON of at most 65,536 bytes. Exactly the four
+top-level keys. `contract_version` must be the integer 1. `work_id` must match
+the work order. 1 to 50 criteria, each with a unique lowercase id, a type from
+the three above, and single-line text of 1 to 500 characters; `ignore_case` is
+optional and must be true or false. Refused: duplicate keys, unknown keys,
+wrong types, other versions, empty or unsupported criteria, non-standard JSON
+numbers, and contract text that matches the secret patterns.
+
+**The artifact.** A path relative to the work order's own project folder, with
+forward slashes. Refused: absolute paths, drive letters, backslashes, `..`,
+`.`, empty or dot-first segments, anything under `work-orders/`, any link on
+the path, a missing or empty file, more than 2,000,000 bytes, text that is not
+valid UTF-8. Another client's folder is therefore out of reach.
+
+**Evaluation.** The artifact is read once. Every criterion is evaluated on
+those bytes with plain text comparison; nothing is executed and there are no
+patterns. One failed criterion fails the contract. The failure receipt lists
+each criterion id as pass or fail. Receipts hold ids, counts and hashes, never
+contract text or artifact text.
+
+**Binding.** A pass writes `evidence_mode: contract-v1`, `contract_sha256`,
+`artifact` and `artifact_sha256` into the work order's frontmatter.
+
+**Staleness.** Before `accepted` and before `delivered`, the tool recomputes
+both hashes. A changed, missing or invalid contract, or a changed or missing
+artifact, is refused with a failure receipt. Lint reports the same as an error
+for verified and accepted work orders, and as a warning after delivery.
+`close --contract` may be run again on a verified or accepted work order: a
+pass sets it to verified (an earlier acceptance no longer applies), a failure
+reopens it and removes the evidence fields.
+
+**Legacy checks.** `--check-file` and `--check-cmd` still work for work orders
+without a contract. They are recorded as `evidence_mode: legacy-technical` and
+described as such in the output, the work order and the end-of-day view. They
+are refused when a contract file exists, and a work order verified the legacy
+way cannot be accepted or delivered once a contract is added until it passes
+`close --contract`.
+
+**What it does not establish.** That the criteria were good ones. That a person
+reviewed anything: `--by` is typed text. That anything was delivered. That the
+files were not edited directly, hashes included. See `KNOWN-GAPS.md`.
+
+**Local results (Linux, synthetic data; tests on Python 3.11, 3.12 and 3.13, mutation check on 3.13).**
+`python3 tests/test_kit.py`: 75 passed, 0 failed, 0 skipped.
+`python3 tests/mutation_check.py`: 5 mutants, 5 killed, 0 survived, 0 invalid.
+Each mutant removes one guard in a disposable copy: the all-criteria result,
+the artifact-hash comparison, the contract-hash comparison, the refusal of
+legacy checks when a contract exists, and the refusal in `mark`. This is not
+mutation coverage.
 
 ## Honest limits
 
@@ -168,3 +249,12 @@ first run on a person's Mac or Windows PC. No install-ready release is made.
 Earlier runs found a .git text-scan error, a test function shadowed by a local
 variable, and a real Windows command-quoting bug. All were fixed before the
 passing run. The earlier failed runs remain visible in Actions.
+
+## Independent review candidate, 14 November 2026
+
+Current isolated candidate: 77 checks passed on Linux Python 3.10, no failures
+or skips; five targeted mutations killed, none survived or invalid. Two checks
+added after independent review reject a linked work-order boundary and control
+characters in artifact paths. Native CI of this candidate is pending until the
+updated commit runs. Historical native results above belong to baseline 5268eac,
+not proof of the current upgrade. No real-user acceptance or delivery is proven.
