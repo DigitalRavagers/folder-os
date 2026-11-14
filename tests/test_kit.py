@@ -510,6 +510,319 @@ def main():
           and (tamper / "outside-file.txt").read_text() == "keep me",
           rs.stdout[-200:] + rs.stderr + ru.stdout + ru.stderr)
 
+    # ---- 16c. Acceptance contracts: criteria bound to the exact output bytes ---------
+    # A separate synthetic tree, so nothing here can lean on the tests above.
+    chome = scratch / "contract-home"
+    chome.mkdir()
+    ctree = chome / "system"
+    run(SCRIPTS / "setup.py", "--answers", KIT / "intake-answers.example.json", "--target", ctree)
+    ccap, clint = ctree / "tools" / "capture.py", ctree / "tools" / "lint.py"
+    proj = ctree / "1-clients/first-real-client/first-project"
+    other = ctree / "1-clients/example-client-synthetic/sample-project"
+    head = "---\ntitle: Summary\ntype: note\nstatus: active\ncreated: 2026-01-01\n---\n"
+    good = head + "## Summary\nFor Example Client. QUOKKA marker line.\n"
+    criteria = [{"id": "has-summary", "type": "has_line", "text": "## Summary"},
+                {"id": "names-client", "type": "contains", "text": "Example Client"},
+                {"id": "no-placeholder", "type": "not_contains", "text": "todo", "ignore_case": True}]
+
+    def new_order(label):
+        run(ccap, "add", "--text", "Contract test item: " + label)
+        ident = sorted((ctree / "0-inbox").glob("*_c*.md"))[0].stem.split("_")[1][:8]
+        run(ccap, "route", "--id", ident, "--client", "First Real Client", "--project",
+            "First Project", "--next", "Write " + label, "--done-when", "contract criteria met")
+        return "WO-" + ident, proj / "work-orders" / ("WO-%s.md" % ident)
+
+    def contract_file(work_id):
+        return proj / "work-orders" / (work_id + ".contract.json")
+
+    def write_contract(work_id, artifact, checks=None, **over):
+        data = {"contract_version": 1, "work_id": work_id, "artifact": artifact,
+                "criteria": criteria if checks is None else checks}
+        data.update(over)
+        contract_file(work_id).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def close(work_id, *how):
+        return run(ccap, "close", "--work-id", work_id, *(how or ("--contract",)))
+
+    def mark(work_id, status):
+        return run(ccap, "mark", "--work-id", work_id, "--status", status, "--by", "Tester")
+
+    def field(order, key):
+        found = re.search(r"^%s: (.*)$" % key, order.read_text(encoding="utf-8"), re.M)
+        return found.group(1) if found else None
+
+    def last_failure():
+        found = sorted((ctree / "logs/receipts").glob("*_failure.json"),
+                       key=lambda p: p.stat().st_mtime_ns)
+        return json.loads(found[-1].read_text())["details"] if found else {}
+
+    def sha(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    w1, o1 = new_order("one")
+    (proj / "deliverables/one_good.md").write_text(good, encoding="utf-8")
+    write_contract(w1, "deliverables/one_good.md")
+    r = close(w1)
+    bound = (field(o1, "evidence_mode") == "contract-v1"
+             and field(o1, "artifact_sha256") == sha(proj / "deliverables/one_good.md")
+             and field(o1, "contract_sha256") == sha(contract_file(w1)))
+    ra, rd = mark(w1, "accepted"), mark(w1, "delivered")
+    check("63 a correct deliverable passes its contract; evidence holds both hashes; then accepted, delivered",
+          r.returncode == 0 and bound and ra.returncode == 0 and rd.returncode == 0
+          and field(o1, "status") == "delivered" and run(clint).returncode == 0,
+          r.stdout + r.stderr + ra.stdout + rd.stdout)
+
+    w2, o2 = new_order("two")
+    (proj / "deliverables/two_wrong.md").write_text(
+        head + "Meeting notes about something else. TODO later.\n", encoding="utf-8")
+    write_contract(w2, "deliverables/two_wrong.md")
+    r = close(w2)
+    check("64 a wrong but non-empty deliverable in the same project fails, and ALL criteria are reported",
+          r.returncode == 1 and field(o2, "status") == "open"
+          and last_failure().get("criteria") == {"has-summary": "fail", "names-client": "fail",
+                                                 "no-placeholder": "fail"}, r.stdout + r.stderr)
+    r_file = close(w2, "--check-file", "1-clients/first-real-client/first-project/deliverables/one_good.md")
+    r_zero = close(w2, "--check-cmd", '"%s" -c "pass"' % sys.executable)
+    r_both = close(w2, "--contract", "--check-cmd", '"%s" -c "pass"' % sys.executable)
+    check("65 with a contract present, an unrelated good file or an always-zero command cannot close it",
+          r_file.returncode == 1 and r_zero.returncode == 1 and r_both.returncode == 2
+          and field(o2, "status") == "open" and field(o2, "evidence") is None
+          and mark(w2, "accepted").returncode == 1, r_file.stdout + r_zero.stdout + r_both.stderr)
+
+    w3, o3 = new_order("three")
+    art3 = proj / "deliverables/three.md"
+    write_contract(w3, "deliverables/three.md")
+    art3.write_text(head + "For Example Client, without the heading.\n", encoding="utf-8")
+    r_section = close(w3)
+    f_section = last_failure().get("criteria")
+    art3.write_text(head + "## Summary\nFor Example Client. Todo: fix this.\n", encoding="utf-8")
+    r_forbid = close(w3)
+    f_forbid = last_failure().get("criteria")
+    art3.write_text(good, encoding="utf-8")
+    r_ok = close(w3)
+    check("66 a missing required section fails; forbidden text fails; each names only its own criterion",
+          r_section.returncode == 1 and r_forbid.returncode == 1 and r_ok.returncode == 0
+          and f_section == {"has-summary": "fail", "names-client": "pass", "no-placeholder": "pass"}
+          and f_forbid == {"has-summary": "pass", "names-client": "pass", "no-placeholder": "fail"},
+          "%s %s %s" % (f_section, f_forbid, r_ok.stdout + r_ok.stderr))
+
+    write_contract(w3, "deliverables/three.md",
+                   criteria + [{"id": "extra", "type": "contains", "text": "Client"}])
+    r_stale = mark(w3, "accepted")
+    lint_stale = run(clint).returncode
+    still = field(o3, "status")
+    r_again = close(w3)
+    check("67 contract changed after the pass: acceptance refused, lint exits 1, re-verify clears it",
+          r_stale.returncode == 1 and still == "verified" and lint_stale == 1
+          and r_again.returncode == 0 and run(clint).returncode == 0
+          and mark(w3, "accepted").returncode == 0, r_stale.stdout + r_again.stdout + r_again.stderr)
+
+    art3.write_text(good + "One more harmless line.\n", encoding="utf-8")
+    r_stale = mark(w3, "delivered")
+    lint_stale = run(clint).returncode
+    still = field(o3, "status")
+    r_again = close(w3)
+    back = field(o3, "status")
+    r_skip = mark(w3, "delivered")
+    r_acc, r_del = mark(w3, "accepted"), mark(w3, "delivered")
+    art3.write_text(good + "Edited after delivery.\n", encoding="utf-8")
+    r_late = run(clint)
+    check("68 artifact changed after the pass: delivery refused, lint exits 1, re-verify voids the old acceptance",
+          r_stale.returncode == 1 and still == "accepted" and lint_stale == 1
+          and r_again.returncode == 0 and back == "verified" and r_skip.returncode == 1
+          and r_acc.returncode == 0 and r_del.returncode == 0
+          and r_late.returncode == 0 and "WARNING" in r_late.stdout,
+          r_stale.stdout + r_again.stdout + r_skip.stdout + r_late.stdout)
+    art3.write_text(good + "One more harmless line.\n", encoding="utf-8")
+
+    w4, o4 = new_order("four")
+    art4 = proj / "deliverables/four.md"
+    art4.write_text(good, encoding="utf-8")
+    write_contract(w4, "deliverables/four.md")
+    r_pass = close(w4)
+    art4.write_text(head + "Replaced with unrelated text.\n", encoding="utf-8")
+    r_stale = mark(w4, "accepted")
+    r_again = close(w4)
+    check("69 artifact changed so it no longer meets the criteria: refused, and re-verify reopens the work order",
+          r_pass.returncode == 0 and r_stale.returncode == 1 and r_again.returncode == 1
+          and field(o4, "status") == "open" and field(o4, "artifact_sha256") is None
+          and field(o4, "evidence_mode") is None and run(clint).returncode == 0,
+          r_stale.stdout + r_again.stdout)
+
+    w5, o5 = new_order("five")
+    (proj / "deliverables/five.md").write_text(good, encoding="utf-8")
+    base = {"contract_version": 1, "work_id": w5, "artifact": "deliverables/five.md",
+            "criteria": criteria}
+
+    def variant(**change):
+        data = dict(base)
+        data.update(change)
+        return json.dumps(data)
+
+    def one(**change):
+        entry = {"id": "a", "type": "contains", "text": "Client"}
+        entry.update(change)
+        return variant(criteria=[{k: v for k, v in entry.items() if v is not None}])
+
+    whole = json.dumps(base)
+    bad_contracts = {
+        "not json": "{ not json",
+        "top level list": json.dumps([base]),
+        "duplicate key": whole[:-1] + ', "artifact": "deliverables/five.md"}',
+        "unknown key": variant(notes="x"),
+        "missing key": json.dumps({k: v for k, v in base.items() if k != "criteria"}),
+        "version 2": variant(contract_version=2),
+        "version true": variant(contract_version=True),
+        "version text": variant(contract_version="1"),
+        "version float": variant(contract_version=1.0),
+        "other work id": variant(work_id="WO-c0000000"),
+        "no criteria": variant(criteria=[]),
+        "criteria not a list": variant(criteria={"id": "a"}),
+        "51 criteria": variant(criteria=[{"id": "n%d" % n, "type": "contains", "text": "x"}
+                                         for n in range(51)]),
+        "criterion not an object": variant(criteria=["## Summary"]),
+        "type regex": one(type="regex"),
+        "type command": one(type="command"),
+        "empty text": one(text="   "),
+        "text not text": one(text=5),
+        "multi-line text": one(text="a\nb"),
+        "text too long": one(text="x" * 501),
+        "extra criterion key": one(pattern=".*"),
+        "missing id": one(id=None),
+        "bad id": one(id="Has Space"),
+        "duplicate ids": variant(criteria=[criteria[0], criteria[0]]),
+        "ignore_case text": one(ignore_case="yes"),
+        "NaN constant": whole.replace("true", "NaN"),
+        "too large": whole + " " * 70000,
+    }
+    assert "NaN" in bad_contracts["NaN constant"], "test bug: NaN case not built"
+    wrong = [name for name, text in bad_contracts.items()
+             if contract_file(w5).write_text(text, encoding="utf-8") is None
+             or close(w5).returncode != 1 or field(o5, "status") != "open"]
+    contract_file(w5).write_bytes(b'{"contract_version": 1, "work_id": "\xff\xfe"}')
+    r_utf = close(w5)
+    lint_bad = run(clint).returncode
+    contract_file(w5).write_text(whole, encoding="utf-8")
+    r_valid = close(w5)
+    check("70 %d malformed or unsupported contracts are all refused; lint flags one; the valid one then passes"
+          % (len(bad_contracts) + 1),
+          not wrong and r_utf.returncode == 1 and lint_bad == 1 and r_valid.returncode == 0,
+          "accepted in error: %s %s" % (wrong, r_valid.stdout + r_valid.stderr))
+
+    w6, o6 = new_order("six")
+    (other / "deliverables/theirs.md").write_text(good, encoding="utf-8")
+    escapes = ["../../example-client-synthetic/sample-project/deliverables/theirs.md",
+               "../first-project/deliverables/one_good.md",
+               str(proj / "deliverables/one_good.md"),
+               "deliverables/../deliverables/one_good.md", "./deliverables/one_good.md",
+               "deliverables\\one_good.md", "deliverables//one_good.md", "C:/one_good.md",
+               ".hidden/one_good.md", "work-orders/%s.md" % w6, "deliverables", "", 5]
+    wrong = []
+    for artifact in escapes:
+        write_contract(w6, artifact)
+        if close(w6).returncode != 1 or field(o6, "status") != "open":
+            wrong.append(artifact)
+    check("71 %d artifact paths that are absolute, climb out, reach another client or name a work order are refused"
+          % len(escapes), not wrong, "accepted in error: %s" % wrong)
+
+    name72 = "72 links are not followed: linked artifact, linked folder on the path, linked contract file"
+    if hasattr(os, "symlink"):
+        os.symlink(other / "deliverables/theirs.md", proj / "deliverables/linked.md")
+        os.symlink(other / "deliverables", proj / "linked-folder")
+        write_contract(w6, "deliverables/linked.md")
+        r_file = close(w6)
+        write_contract(w6, "linked-folder/theirs.md")
+        r_dir = close(w6)
+        write_contract(w6, "deliverables/one_good.md")
+        real = chome / "real.contract.json"
+        contract_file(w6).replace(real)
+        os.symlink(real, contract_file(w6))
+        r_link = close(w6)
+        r_legacy = close(w6, "--check-file",
+                         "1-clients/first-real-client/first-project/deliverables/one_good.md")
+        check(name72, r_file.returncode == 1 and r_dir.returncode == 1 and r_link.returncode == 1
+              and r_legacy.returncode == 1 and field(o6, "status") == "open",
+              r_file.stdout + r_dir.stdout + r_link.stdout + r_legacy.stdout)
+        for link in (proj / "deliverables/linked.md", proj / "linked-folder", contract_file(w6)):
+            link.unlink()
+    else:
+        record("SKIP", name72, "no symlink support")
+
+    art6 = proj / "deliverables/six.md"
+    write_contract(w6, "deliverables/six.md")
+    codes = [close(w6).returncode]                                    # missing
+    art6.write_bytes(b"")
+    codes.append(close(w6).returncode)                                # empty
+    art6.write_bytes(good.encode("utf-8") + b"\xff\xfe broken bytes\n")
+    codes.append(close(w6).returncode)                                # not UTF-8
+    art6.write_bytes(good.encode("utf-8") + b"a" * 2000001)
+    codes.append(close(w6).returncode)                                # too large
+    art6.write_text(good, encoding="utf-8")
+    r_fixed = close(w6)
+    check("73 a missing, empty, non-UTF-8 or oversized artifact is refused; the repaired one passes",
+          codes == [1, 1, 1, 1] and r_fixed.returncode == 0, "%s %s" % (codes, r_fixed.stdout))
+
+    w7, o7 = new_order("seven")
+    r = close(w7, "--check-file", "1-clients/first-real-client/first-project/deliverables/one_good.md")
+    r_eod = run(ctree / "tools" / "eod.py")
+    r_acc = mark(w7, "accepted")
+    write_contract(w7, "deliverables/one_good.md")
+    r_del = mark(w7, "delivered")
+    lint_mixed = run(clint).returncode
+    r_up = close(w7)
+    check("74 legacy --check-file still works but is labelled LEGACY, and cannot carry a later contract forward",
+          r.returncode == 0 and "LEGACY" in r.stdout and "legacy evidence" in r_eod.stdout
+          and r_acc.returncode == 0 and r_del.returncode == 1 and lint_mixed == 1
+          and r_up.returncode == 0 and field(o7, "evidence_mode") == "contract-v1"
+          and field(o7, "status") == "verified", r.stdout + r_del.stdout + r_up.stdout + r_up.stderr)
+
+    w8, o8 = new_order("eight")
+    write_contract(w8, "deliverables/one_good.md",
+                   [{"id": "a", "type": "contains", "text": "password: " + CANARIES["passphrase"]}])
+    r = close(w8)
+    contract_file(w8).unlink()
+    receipts = "\n".join(p.read_text(encoding="utf-8") for p in (ctree / "logs/receipts").glob("*.json"))
+    check("75 a contract holding a secret is refused; no receipt holds artifact text, criterion text or the secret",
+          r.returncode == 1 and "QUOKKA" not in receipts and "## Summary" not in receipts
+          and "Example Client" not in receipts and CANARIES["passphrase"] not in receipts
+          and run(clint).returncode == 0, r.stdout + r.stderr)
+
+    # A linked work order must not relocate the project evidence boundary.
+    wlink, olink = new_order("linked-order-boundary")
+    external = chome / "outside-project"
+    (external / "work-orders").mkdir(parents=True)
+    (external / "deliverables").mkdir()
+    external_order = external / "work-orders" / olink.name
+    external_order.write_bytes(olink.read_bytes())
+    (external / "deliverables" / "outside.md").write_text(good, encoding="utf-8")
+    write_contract(wlink, "deliverables/outside.md")
+    saved_order = olink.read_bytes()
+    link_supported = False
+    try:
+        olink.unlink()
+        olink.symlink_to(external_order)
+        link_supported = True
+        attempt = close(wlink)
+        safe_link = attempt.returncode != 0 and "evidence_mode:" not in external_order.read_text()
+    except (OSError, NotImplementedError):
+        safe_link = True
+    finally:
+        if olink.is_symlink():
+            olink.unlink()
+        if not olink.exists():
+            olink.write_bytes(saved_order)
+    contract_file(wlink).unlink()
+    if link_supported:
+        check("76 linked work order cannot relocate the evidence boundary", safe_link)
+    else:
+        record("SKIP", "76 linked work order boundary", "no file symlink support")
+    wcontrol, ocontrol = new_order("control-path")
+    write_contract(wcontrol, "deliverables/line\nbreak.md")
+    control_attempt = close(wcontrol)
+    check("77 control characters in artifact paths are refused", control_attempt.returncode == 1
+          and field(ocontrol, "status") == "open")
+    contract_file(wcontrol).unlink()
+
     # ---- 17. The kit's own text ------------------------------------------------------
     sys.path.insert(0, str(SCRIPTS))
     import common
