@@ -56,8 +56,11 @@ def main():
         for meta in orders[folder]:
             if meta.get("status") in ("open", "verified", "accepted"):
                 waiting += 1
-                print("  %s  [%s]  %s" % (meta.get("work_id"), meta.get("status"),
-                                          folder.relative_to(root).as_posix()))
+                mode = {"contract-v1": ", contract evidence",
+                        "legacy-technical": ", legacy evidence"}.get(
+                            meta.get("evidence_mode"), "")
+                print("  %s  [%s%s]  %s" % (meta.get("work_id"), meta.get("status"), mode,
+                                            folder.relative_to(root).as_posix()))
                 print("    next step: %s" % meta.get("next_step"))
                 print("    done when: %s" % meta.get("done_when"))
     if not waiting:
